@@ -144,7 +144,7 @@ const EditComponent = forwardRef((props: any, ref) => {
   });
 
   const getOEmbedHtml = useCallback(
-    async (url) => {
+    async (url: string) => {
       // Fetch the embed code from the YouTube oEmbed API
       const response = await fetch(
         `https://www.youtube.com/oembed?url=${encodeURIComponent(
@@ -158,8 +158,8 @@ const EditComponent = forwardRef((props: any, ref) => {
   );
 
   const pasteHandler = useCallback(
-    async (event) => {
-      const url = event.clipboardData.getData("text");
+    async (event: ClipboardEvent) => {
+      const url = event.clipboardData?.getData("text") ?? "";
       if (url.startsWith("https://www.youtube.com/watch?v=")) {
         const html = await getOEmbedHtml(url);
         editor.commands.insertContent(html);

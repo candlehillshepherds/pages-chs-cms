@@ -57,6 +57,7 @@ const write = (value: any, field: Field, config: Record<string, any>) => {
 
     content = content
       .replace(/(<br[^>]*?) *\/?>/g, "$1 />") // self closing br tags
+      .replace(/(<img[^>]*?) *\/?>/g, "$1 />") // self closing br tags
       .replace(/\ style=\"[a-zA-Z0-9\s:\.%_-]*\"/g, "") // remove any table style attrs
       .replaceAll("rowspan=", "rowSpan=") // lightly make html Tables react dom ready...
       .replaceAll("colspan=", "colSpan=")

@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useCallback, useRef, useState } from "react";
+import { forwardRef, useCallback, useRef, useState, useMemo } from "react";
 import { BubbleMenu, EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
@@ -58,28 +58,85 @@ import {
   Trash2,
   Underline as UnderlineIcon
 } from "lucide-react";
+import { toast } from "sonner";
+import { getSchemaByName } from "@/lib/schema";
+import { extensionCategories, normalizePath } from "@/lib/utils/file";
 
 const EditComponent = forwardRef((props: any, ref) => {
   const { config } = useConfig();
   const { isPrivate } = useRepo();
-  
-  const { value, onChange } = props;
-  const mediaDialogRef = useRef<MediaDialogHandle>(null); 
+
+  const { value, field, onChange } = props;
+
+  const mediaConfig = useMemo(() => {
+    if (!config?.object?.media?.length) {
+      return undefined;
+    }
+    return field.options?.media !== false
+      ? field.options?.media
+        ? getSchemaByName(config.object, field.options.media, "media")
+        : config.object.media[0]
+      : undefined;
+  }, [field.options?.media, config?.object]);
+
+  const allowedExtensions = useMemo(() => {
+    if (!mediaConfig) return [];
+
+    let extensions = extensionCategories['image'];
+
+    const fieldExtensions = field.options?.extensions 
+      ? field.options.extensions
+      : field.options?.categories
+        ? field.options.categories.flatMap((category: string) => extensionCategories[category])
+        : [];
+
+    if (fieldExtensions.length) {
+      extensions = extensions.filter(ext => fieldExtensions.includes(ext));
+    }
+
+    if (mediaConfig.extensions) {
+      extensions = extensions.filter(ext => mediaConfig.extensions.includes(ext));
+    }
+
+    return extensions;
+  }, [field.options?.extensions, field.options?.categories, mediaConfig]);
+
+  const mediaName = mediaConfig?.name || config?.object.media[0].name;
+  if (!mediaName) throw new Error("No media defined.");
+
+  const mediaDialogRef = useRef<MediaDialogHandle>(null);
   const bubbleMenuRef = useRef<HTMLDivElement | null>(null);
 
   const [isContentReady, setContentReady] = useState(false);
-  
-  const [linkUrl, setLinkUrl] = useState("");
 
-  const openMediaDialog = config?.object.media?.input
+  const [linkUrl, setLinkUrl] = useState("");
+  const [imageAlt, setImageAlt] = useState("");
+
+  const openMediaDialog = mediaConfig?.input
     ? () => { if (mediaDialogRef.current) mediaDialogRef.current.open() }
     : undefined;
 
+  const rootPath = useMemo(() => {
+    if (!field.options?.path) {
+      return mediaConfig?.input;
+    }
+
+    const normalizedPath = normalizePath(field.options.path);
+    const normalizedMediaPath = normalizePath(mediaConfig?.input);
+
+    if (!normalizedPath.startsWith(normalizedMediaPath)) {
+      console.warn(`"${field.options.path}" is not within media root "${mediaConfig?.input}". Defaulting to media root.`);
+      return mediaConfig?.input;
+    }
+
+    return normalizedPath;
+  }, [field.options?.path, mediaConfig?.input]);
+
   const editor = useEditor({
-    immediatelyRender: true,
+    immediatelyRender: false,
     extensions: [
       StarterKit.configure({
-        dropcursor: { width: 2}
+        dropcursor: { width: 2 }
       }),
       Image.extend({
         addAttributes() {
@@ -116,8 +173,15 @@ const EditComponent = forwardRef((props: any, ref) => {
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
     onCreate: async ({ editor }) => {
       if (config && value) {
-        const initialContent = await relativeToRawUrls(config.owner, config.repo, config.branch, value, isPrivate); 
-        editor.commands.setContent(initialContent || "<p></p>");
+        try {
+          const initialContent = await relativeToRawUrls(config.owner, config.repo, config.branch, mediaName, value, isPrivate);
+          editor.commands.setContent(initialContent || "<p></p>");
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          console.warn(errorMessage);
+          toast.error(`${errorMessage} Check if the image exists or if media configuration is correct.`);
+          editor.commands.setContent(value);
+        }
       }
       setContentReady(true);
     }
@@ -126,12 +190,18 @@ const EditComponent = forwardRef((props: any, ref) => {
   const handleMediaDialogSubmit = useCallback(async (images: string[]) => {
     if (config && editor) {
       const content = await Promise.all(images.map(async (image) => {
-        const url = await getRawUrl(config.owner, config.repo, config.branch, image, isPrivate);
-        return `<p><img src="${url}"></p>`;
+        try {
+          const url = await getRawUrl(config.owner, config.repo, config.branch, mediaName, image, isPrivate);
+          return `<p><img src="${url}"></p>`;
+        } catch {
+          toast.error(`Failed to load image: ${image}`);
+          // Return a placeholder with error styling
+          return `<p><img src="" alt="${image}" class="border border-destructive bg-destructive/10 rounded-md" /></p>`;
+        }
       }));
       editor.chain().focus().insertContent(content.join('\n')).run();
     }
-  }, [config, editor, isPrivate]);
+  }, [config, editor, isPrivate, mediaName]);
 
   const getBlockIcon = (editor: any) => {
     if (editor.isActive("heading", { level: 1 })) return <Heading1 className="h-4 w-4" />;
@@ -150,7 +220,7 @@ const EditComponent = forwardRef((props: any, ref) => {
     if (editor.isActive({ textAlign: "justify" })) return <AlignJustify className="h-4 w-4" />;
     return <AlignLeft className="h-4 w-4" />;
   };
-  
+
   return (
     <>
       <Skeleton className={cn("rounded-md h-[8.5rem]", isContentReady ? "hidden" : "")} />
@@ -166,10 +236,10 @@ const EditComponent = forwardRef((props: any, ref) => {
                   className="gap-x-1"
                 >
                   {getBlockIcon(editor)}
-                  <ChevronsUpDown className="w-3 h-3"/>
+                  <ChevronsUpDown className="w-3 h-3" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" portalProps={{container: bubbleMenuRef.current}}>
+              <DropdownMenuContent align="start" portalProps={{ container: bubbleMenuRef.current }}>
                 <DropdownMenuItem onClick={() => editor.chain().focus().setParagraph().run()} className="gap-x-1.5">
                   <Pilcrow className="h-4 w-4" />
                   Text
@@ -232,7 +302,7 @@ const EditComponent = forwardRef((props: any, ref) => {
                     onClick={() => linkUrl
                       ? editor.chain().focus().extendMarkRange('link').setLink({ href: linkUrl }).run()
                       : editor.chain().focus().extendMarkRange('link').unsetLink()
-                      .run()
+                        .run()
                     }
                   >Link</Button>
                   <Button
@@ -248,7 +318,7 @@ const EditComponent = forwardRef((props: any, ref) => {
                 </div>
               </PopoverContent>
             </Popover>
-            {(editor.isActive("paragraph") || editor.isActive("heading")) && 
+            {(editor.isActive("paragraph") || editor.isActive("heading")) &&
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -258,10 +328,10 @@ const EditComponent = forwardRef((props: any, ref) => {
                     className="gap-x-1"
                   >
                     {getAlignIcon(editor)}
-                    <ChevronsUpDown className="w-3 h-3"/>
+                    <ChevronsUpDown className="w-3 h-3" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent portalProps={{container: bubbleMenuRef.current}}>
+                <DropdownMenuContent portalProps={{ container: bubbleMenuRef.current }}>
                   <DropdownMenuItem onClick={() => editor.chain().focus().setTextAlign("left").run()} className="gap-x-1.5">
                     <AlignLeft className="h-4 w-4" />
                     Align left
@@ -335,7 +405,7 @@ const EditComponent = forwardRef((props: any, ref) => {
             >
               <RemoveFormatting className="h-4 w-4" />
             </Button>
-            {editor.isActive("table") && 
+            {editor.isActive("table") &&
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -345,10 +415,10 @@ const EditComponent = forwardRef((props: any, ref) => {
                     className="gap-x-1"
                   >
                     <TableIcon className="h-4 w-4" />
-                    <ChevronsUpDown className="w-3 h-3"/>
+                    <ChevronsUpDown className="w-3 h-3" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" portalProps={{container: bubbleMenuRef.current}}>
+                <DropdownMenuContent align="end" portalProps={{ container: bubbleMenuRef.current }}>
                   <DropdownMenuItem onClick={() => editor.chain().focus().addColumnAfter().run()}>Add a column</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => editor.chain().focus().addRowAfter().run()}>Add a row</DropdownMenuItem>
                   <DropdownMenuSeparator />
@@ -361,10 +431,62 @@ const EditComponent = forwardRef((props: any, ref) => {
                 </DropdownMenuContent>
               </DropdownMenu>
             }
+            {editor.isActive("image") &&
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xxs"
+                    className="shrink-0 text-[0.6rem]"
+                    onClick={() => setImageAlt(editor.getAttributes('image').alt || "")}
+                  >
+                    ALT
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="p-1">
+                  <div className="flex gap-x-1 items-center">
+                    <Input
+                      className="h-8 flex-1"
+                      placeholder="Image description"
+                      value={imageAlt}
+                      onChange={e => setImageAlt(e.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xxs"
+                      className="shrink-0"
+                      onClick={() => {
+                        editor.chain().focus().updateAttributes('image', { alt: imageAlt }).run();
+                      }}
+                    >Set</Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xxs"
+                      className="shrink-0"
+                      onClick={() => {
+                        editor.chain().focus().updateAttributes('image', { alt: "" }).run();
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            }
           </div>
         </BubbleMenu>}
         <EditorContent editor={editor} />
-        <MediaDialog ref={mediaDialogRef} selected={[]} onSubmit={handleMediaDialogSubmit}/>
+        <MediaDialog 
+          ref={mediaDialogRef} 
+          media={mediaConfig?.name}
+          initialPath={rootPath}
+          extensions={allowedExtensions}
+          selected={[]} 
+          onSubmit={handleMediaDialogSubmit} 
+        />
       </div>
     </>
   )

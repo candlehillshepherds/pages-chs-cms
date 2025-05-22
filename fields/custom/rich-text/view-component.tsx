@@ -3,6 +3,8 @@
 import { Field } from "@/types/field";
 
 const ViewComponent = ({ value, field }: { value: string; field: Field }) => {
+  if (!value) return null;
+
   const sanitizeHtml = (text: string) => {
     return text
       .replace(/<[^>]*>/g, " ")

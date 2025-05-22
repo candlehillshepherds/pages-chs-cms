@@ -5,19 +5,26 @@ import { ViewComponent } from "./view-component";
 import { marked } from "marked";
 import TurndownService from "turndown";
 import { strikethrough } from "joplin-turndown-plugin-gfm";
+import { getSchemaByName } from "@/lib/schema";
 
 const read = (value: any, field: Field, config: Record<string, any>) => {
   let html =
     field.options?.format === "html" ? value : value ? marked(value) : value;
 
-  const prefixInput = field.options?.input ?? config.object.media?.input;
-  const prefixOutput = field.options?.output ?? config.object.media?.output;
+  const mediaConfig =
+    field.options?.media === false
+      ? undefined
+      : field.options?.media && typeof field.options.media === "string"
+      ? getSchemaByName(config.object, field.options.media, "media")
+      : config.object.media[0];
 
-  return htmlSwapPrefix(html, prefixOutput, prefixInput, true);
+  if (!mediaConfig) return html;
+
+  return htmlSwapPrefix(html, mediaConfig.output, mediaConfig.input, true);
 };
 
 const write = (value: any, field: Field, config: Record<string, any>) => {
-  let content = value;
+  let content = value || "";
 
   content = rawToRelativeUrls(
     config.owner,
@@ -26,15 +33,21 @@ const write = (value: any, field: Field, config: Record<string, any>) => {
     content
   );
 
-  const prefixInput = field.options?.input ?? config.object.media?.input;
-  const prefixOutput = field.options?.output ?? config.object.media?.output;
+  const mediaConfig =
+    field.options?.media === false
+      ? undefined
+      : field.options?.media && typeof field.options.media === "string"
+      ? getSchemaByName(config.object, field.options.media, "media")
+      : config.object.media[0];
 
-  content = htmlSwapPrefix(content, prefixInput, prefixOutput);
+  if (mediaConfig) {
+    content = htmlSwapPrefix(content, mediaConfig.input, mediaConfig.output);
+  }
 
   if (field.options?.format !== "html") {
     const turndownService = new TurndownService({
-      codeBlockStyle: "fenced",
       headingStyle: "atx",
+      codeBlockStyle: "fenced",
     });
 
     turndownService.keep(["br", "table", "iframe"]);
@@ -57,7 +70,6 @@ const write = (value: any, field: Field, config: Record<string, any>) => {
 
     content = content
       .replace(/(<br[^>]*?) *\/?>/g, "$1 />") // self closing br tags
-      .replace(/(<img[^>]*?) *\/?>/g, "$1 />") // self closing br tags
       .replace(/\ style=\"[a-zA-Z0-9\s:\.%_-]*\"/g, "") // remove any table style attrs
       .replaceAll("rowspan=", "rowSpan=") // lightly make html Tables react dom ready...
       .replaceAll("colspan=", "colSpan=")

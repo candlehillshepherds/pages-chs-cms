@@ -107,6 +107,7 @@ const EditComponent = forwardRef((props: any, ref) => {
     return extensions;
   }, [field.options?.extensions, field.options?.categories, mediaConfig]);
 
+
   const mediaDialogRef = mediaConfig
     ? useRef<MediaDialogHandle>(null)
     : undefined;
@@ -131,6 +132,7 @@ const EditComponent = forwardRef((props: any, ref) => {
     if (!field.options?.path) {
       return mediaConfig?.input;
     }
+
     const normalizedPath = normalizePath(field.options.path);
     const normalizedMediaPath = normalizePath(mediaConfig?.input);
 
@@ -203,6 +205,7 @@ const EditComponent = forwardRef((props: any, ref) => {
                 isPrivate
               )
             : value;
+
           editor.commands.setContent(initialContent || "<p></p>");
         } catch (error) {
           const errorMessage =
